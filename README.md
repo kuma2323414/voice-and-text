@@ -44,6 +44,13 @@ run.bat       :: 启动
 
 要求 Python 3.10+ 正式版（安装时勾选 tcl/tk，否则没有 tkinter）。
 
+### 两份安装文档
+
+| 文档 | 给谁看 |
+| --- | --- |
+| [INSTALL.md](INSTALL.md) | **人**。从装驱动到配语聊软件，一步一步照着做 |
+| [AI-INSTALL-PROMPT.md](AI-INSTALL-PROMPT.md) | **AI agent**。把里面那段提示词复制给你自己的 AI，让它带你装 |
+
 ---
 
 ## 必须准备：虚拟声卡
