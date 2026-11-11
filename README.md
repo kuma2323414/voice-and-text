@@ -44,12 +44,15 @@ run.bat       :: 启动
 
 要求 Python 3.10+ 正式版（安装时勾选 tcl/tk，否则没有 tkinter）。
 
-### 两份安装文档
+### 三份文档
 
 | 文档 | 给谁看 |
 | --- | --- |
 | [INSTALL.md](INSTALL.md) | **人**。从装驱动到配语聊软件，一步一步照着做 |
 | [AI-INSTALL-PROMPT.md](AI-INSTALL-PROMPT.md) | **AI agent**。把里面那段提示词复制给你自己的 AI，让它带你装 |
+| [docs/FREE-TTS-CHANNELS.md](docs/FREE-TTS-CHANNELS.md) | **Edge 失效时看这个**。免费渠道名单 + 怎么换 |
+
+> 默认的 Edge 在线音色不是官方 API，微软随时可能调整或关停。真遇到报错、音色消失、一直「合成中」，去看第三份文档，里面有能立刻切换的内置方案和加几行代码就能接的官方渠道。
 
 ---
 

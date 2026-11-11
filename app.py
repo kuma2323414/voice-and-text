@@ -1636,6 +1636,10 @@ class App:
                 msg = str(e)
                 if "401" in msg or "403" in msg:
                     msg = "鉴权失败，检查 API Key"
+                elif self._engine_key() == "edge":
+                    # Edge 是逆向接口，微软随时可能调整或关停。出错时明确指路，
+                    # 否则用户只会以为是自己的网络问题。
+                    msg += "（Edge 音色可能已失效，见 docs/FREE-TTS-CHANNELS.md）"
                 self._set_status("出错：" + msg, DANGER)
             finally:
                 self._working = False
