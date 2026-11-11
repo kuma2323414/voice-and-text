@@ -38,9 +38,14 @@ try:
 except Exception:
     pass
 
-RVC_DIR = os.environ.get("RVC_DIR", r"D:\rvc\RVC-GPU")
+RVC_DIR = os.environ.get("RVC_DIR", "").strip()
 THREADS = os.environ.get("RVC_THREADS", "12")
 DEVICE = os.environ.get("RVC_DEVICE", "cpu")
+
+if not RVC_DIR or not os.path.isdir(RVC_DIR):
+    # 本进程由主程序按「设置」里的 RVC 目录拉起，不该被单独运行。
+    print("RVC_DIR 未设置或不存在：%r" % RVC_DIR, file=sys.stderr)
+    sys.exit(1)
 
 os.environ["OMP_NUM_THREADS"] = THREADS
 os.environ["MKL_NUM_THREADS"] = THREADS

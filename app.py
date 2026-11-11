@@ -68,7 +68,8 @@ EDGE_VOICES = [
 ]
 EDGE_VOICE_CODES = {c for _, c in EDGE_VOICES}
 
-RVC_DEFAULT_DIR = "D:\\rvc\\RVC-GPU"
+# 留空表示还没配置，由使用者在「设置 → 高级 · RVC 变声」里指定自己的 RVC 目录
+RVC_DEFAULT_DIR = ""
 
 DEFAULT_PHRASES = [
     "我马上到", "打野在右边", "别冲，等我", "稍等一下",
@@ -364,6 +365,9 @@ class RvcClient:
     # ---------- 进程管理 ----------
     def _start(self):
         rvc_dir = self.cfg_get("rvc_dir") or RVC_DEFAULT_DIR
+        if not rvc_dir:
+            raise RuntimeError(
+                "还没设置 RVC 目录，去「设置 → 高级 · RVC 变声」填你自己解压出来的 RVC-GPU 路径")
         py = ""
         for cand in (
             os.path.join(rvc_dir, "runtime-gpu", "Scripts", "python.exe"),
@@ -1376,6 +1380,8 @@ class App:
     # ------------------------------------------------------------ RVC 模型
     def _rvc_models(self):
         rvc_dir = self.cfg.get("rvc_dir") or RVC_DEFAULT_DIR
+        if not rvc_dir:
+            return []
         wdir = os.path.join(rvc_dir, "weights")
         names = []
         if os.path.isdir(wdir):
