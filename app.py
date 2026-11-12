@@ -84,6 +84,7 @@ DEFAULT_CONFIG = {
     "device_name": "CABLE Input",
     "always_on_top": True,
     "hide_after_send": True,
+    "restore_foreground": True,
     "hotkey_summon": "Ctrl+Alt+Space",
     "geometry": "470x320+120+80",
     "fish_key": "",
@@ -347,6 +348,64 @@ class HotkeyThread(threading.Thread):
             self.join(1.5)
         except Exception:
             pass
+
+
+# ================================================================ 前台窗口
+def get_foreground_window():
+    """当前前台窗口的 HWND，拿不到返回 0。"""
+    try:
+        return int(ctypes.windll.user32.GetForegroundWindow() or 0)
+    except Exception:
+        return 0
+
+
+def is_our_window(hwnd):
+    """这个 HWND 是不是本程序自己的窗口。"""
+    if not hwnd:
+        return False
+    try:
+        pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(
+            wintypes.HWND(hwnd), ctypes.byref(pid))
+        return pid.value == os.getpid()
+    except Exception:
+        return False
+
+
+def set_foreground_window(hwnd):
+    """把前台焦点还给指定窗口（一般是召唤前的游戏）。
+
+    只 iconify 自己是不够的：前台窗口会空着，游戏全屏被踢下来之后要等用户
+    手动 Alt+Tab 才回得去。这里主动把焦点送回去。
+
+    Windows 不允许非前台进程抢前台，所以临时 AttachThreadInput 到当前前台
+    线程，设完立刻解绑——这是这个场景的标准做法。
+    """
+    if not hwnd:
+        return False
+    try:
+        user32 = ctypes.windll.user32
+        if not user32.IsWindow(wintypes.HWND(hwnd)):
+            return False
+        if user32.GetForegroundWindow() == hwnd:
+            return True
+        fg = user32.GetForegroundWindow()
+        cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+        fg_tid = 0
+        if fg:
+            pid = wintypes.DWORD()
+            fg_tid = user32.GetWindowThreadProcessId(wintypes.HWND(fg), ctypes.byref(pid))
+        attached = False
+        if fg_tid and fg_tid != cur_tid:
+            attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+        try:
+            user32.SetForegroundWindow(wintypes.HWND(hwnd))
+        finally:
+            if attached:
+                user32.AttachThreadInput(cur_tid, fg_tid, False)
+        return user32.GetForegroundWindow() == hwnd
+    except Exception:
+        return False
 
 
 # ================================================================ RVC 客户端
@@ -874,6 +933,7 @@ class App:
         self._working = False
         self._stop_token = 0
         self._cfg_warned = False
+        self._game_hwnd = 0        # 召唤前的那个窗口（通常是游戏），收起时把焦点还回去
         self.rvc = RvcClient(lambda k: self.cfg.get(k))
         self.edge_pool = EdgePool()
         self.player = Player()
@@ -1670,6 +1730,15 @@ class App:
             self.root.iconify()
         except Exception:
             pass
+        # 把焦点还给召唤前的窗口。只收起自己是不够的：前台会空着，游戏被踢到
+        # 桌面后要等用户手动 Alt+Tab 才回得来，体感就是「强制切桌面」。
+        hwnd = getattr(self, "_game_hwnd", 0)
+        if hwnd and self.cfg.get("restore_foreground", True):
+            # 等 iconify 生效再抢，太早会和我们自己打架
+            try:
+                self.root.after(80, lambda: set_foreground_window(hwnd))
+            except Exception:
+                pass
 
     # ------------------------------------------------------------ 播放控制
     def _on_player_state(self, state):
@@ -1774,9 +1843,16 @@ class App:
 
     def _summon(self):
         try:
+            # 先记下现在是谁在前台。我们一 deiconify + focus_force 就会把它顶掉，
+            # 全屏独占的游戏被顶掉会直接退回桌面。
+            prev = get_foreground_window()
+            if prev and not is_our_window(prev):
+                self._game_hwnd = prev
             self.root.deiconify()
             self.root.lift()
-            self.root.attributes("-topmost", True)
+            # 按用户设置来，别召唤一次就把「置顶」强行打开
+            if self.cfg.get("always_on_top", True):
+                self.root.attributes("-topmost", True)
             self.root.focus_force()
             self.text.focus_set()
             if not self._placeholder_on:
