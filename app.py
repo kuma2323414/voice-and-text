@@ -372,37 +372,78 @@ def is_our_window(hwnd):
         return False
 
 
+def _attach_and_set_foreground(hwnd):
+    """AttachThreadInput 到当前前台线程后 SetForegroundWindow，然后解绑。"""
+    user32 = ctypes.windll.user32
+    fg = user32.GetForegroundWindow()
+    cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+    fg_tid = 0
+    if fg:
+        pid = wintypes.DWORD()
+        fg_tid = user32.GetWindowThreadProcessId(wintypes.HWND(fg), ctypes.byref(pid))
+    attached = False
+    if fg_tid and fg_tid != cur_tid:
+        attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+    try:
+        user32.SetForegroundWindow(wintypes.HWND(hwnd))
+    finally:
+        if attached:
+            user32.AttachThreadInput(cur_tid, fg_tid, False)
+
+
+def _tap_alt():
+    """模拟一次 Alt 按下抬起。
+
+    Windows 有个「前台锁」：只有前台进程、或者刚收到过输入事件的进程，才允许
+    调 SetForegroundWindow。有些游戏（尤其带反作弊的）被踢到后台后连这点都不认，
+    敲一下 Alt 能让系统重新把输入事件算到我们头上，从而解锁。
+    """
+    try:
+        user32 = ctypes.windll.user32
+        VK_MENU, KEYUP = 0x12, 0x0002
+        user32.keybd_event(VK_MENU, 0, 0, 0)
+        user32.keybd_event(VK_MENU, 0, KEYUP, 0)
+    except Exception:
+        pass
+
+
 def set_foreground_window(hwnd):
     """把前台焦点还给指定窗口（一般是召唤前的游戏）。
 
     只 iconify 自己是不够的：前台窗口会空着，游戏全屏被踢下来之后要等用户
     手动 Alt+Tab 才回得去。这里主动把焦点送回去。
 
-    Windows 不允许非前台进程抢前台，所以临时 AttachThreadInput 到当前前台
-    线程，设完立刻解绑——这是这个场景的标准做法。
+    分三级尝试，逐级放宽：
+      1. AttachThreadInput + SetForegroundWindow（标准做法，多数游戏够用）
+      2. 敲一下 Alt 解锁前台锁后重试（带反作弊的游戏常需要）
+      3. SwitchToThisWindow（非公开 API，但对「最小化后要回来」更宽容）
+
+    注意调用时机：必须在**我们还持有前台**的时候调（也就是收起自己之前），
+    收起之后本进程不再是前台，第 1、2 级都会被直接拒绝。
     """
     if not hwnd:
         return False
     try:
         user32 = ctypes.windll.user32
-        if not user32.IsWindow(wintypes.HWND(hwnd)):
+        h = wintypes.HWND(hwnd)
+        if not user32.IsWindow(h):
             return False
+        # 最小化的窗口得先还原，否则设成前台也看不见
+        if user32.IsIconic(h):
+            user32.ShowWindow(h, 9)        # SW_RESTORE
         if user32.GetForegroundWindow() == hwnd:
             return True
-        fg = user32.GetForegroundWindow()
-        cur_tid = ctypes.windll.kernel32.GetCurrentThreadId()
-        fg_tid = 0
-        if fg:
-            pid = wintypes.DWORD()
-            fg_tid = user32.GetWindowThreadProcessId(wintypes.HWND(fg), ctypes.byref(pid))
-        attached = False
-        if fg_tid and fg_tid != cur_tid:
-            attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
-        try:
-            user32.SetForegroundWindow(wintypes.HWND(hwnd))
-        finally:
-            if attached:
-                user32.AttachThreadInput(cur_tid, fg_tid, False)
+
+        _attach_and_set_foreground(hwnd)
+        if user32.GetForegroundWindow() == hwnd:
+            return True
+
+        _tap_alt()
+        _attach_and_set_foreground(hwnd)
+        if user32.GetForegroundWindow() == hwnd:
+            return True
+
+        user32.SwitchToThisWindow(h, True)
         return user32.GetForegroundWindow() == hwnd
     except Exception:
         return False
@@ -1726,19 +1767,29 @@ class App:
         return "break"
 
     def _collapse(self):
+        hwnd = getattr(self, "_game_hwnd", 0)
+        restore = bool(hwnd) and self.cfg.get("restore_foreground", True)
+
+        # 顺序很关键：必须在 iconify 之前还焦点。
+        # 一旦我们收起，本进程就不再是前台，Windows 的前台锁会让
+        # SetForegroundWindow 直接失败——之前「还焦点」没效果就是这个原因。
+        first_ok = False
+        if restore:
+            first_ok = set_foreground_window(hwnd)
+
         try:
             self.root.iconify()
         except Exception:
             pass
-        # 把焦点还给召唤前的窗口。只收起自己是不够的：前台会空着，游戏被踢到
-        # 桌面后要等用户手动 Alt+Tab 才回得来，体感就是「强制切桌面」。
-        hwnd = getattr(self, "_game_hwnd", 0)
-        if hwnd and self.cfg.get("restore_foreground", True):
-            # 等 iconify 生效再抢，太早会和我们自己打架
-            try:
-                self.root.after(80, lambda: set_foreground_window(hwnd))
-            except Exception:
-                pass
+
+        if restore and not first_ok:
+            # 有些游戏（无畏契约这类带反作弊的）在切换显示模式期间不给面子，
+            # 等它退完再从桌面抢一次。
+            for delay in (200, 600):
+                try:
+                    self.root.after(delay, lambda h=hwnd: set_foreground_window(h))
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------ 播放控制
     def _on_player_state(self, state):
